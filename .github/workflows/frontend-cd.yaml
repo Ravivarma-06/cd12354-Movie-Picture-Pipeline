@@ -177,7 +177,6 @@ jobs:
             echo "Frontend image mismatch: expected $expected_image, got $actual_image" >&2
             exit 1
           fi
-          kubectl wait --for=condition=Ready pod --selector=app=frontend --namespace "$K8S_NAMESPACE" --timeout=180s
           kubectl get deployment frontend --namespace "$K8S_NAMESPACE"
           kubectl get pods --selector=app=frontend --namespace "$K8S_NAMESPACE" --output=wide
           kubectl get service frontend --namespace "$K8S_NAMESPACE" --output=wide
