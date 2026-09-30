@@ -186,19 +186,17 @@ jobs:
       - name: Verify frontend LoadBalancer response
         run: |
           set -euo pipefail
-          for attempt in {1..30}; do
-            frontend_host="$(kubectl get service frontend --namespace "$K8S_NAMESPACE" --output=jsonpath='{.status.loadBalancer.ingress[0].hostname}{.status.loadBalancer.ingress[0].ip}')"
-            if [[ -n "$frontend_host" ]]; then
-              html="$(curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "http://$frontend_host/")"
-              if [[ "$html" == *'<div id="root"></div>'* ]]; then
-                echo "Frontend LoadBalancer is serving the app shell."
-                exit 0
+          for attempt in {1..20}; do
+            if frontend_host="$(kubectl get service frontend --namespace "$K8S_NAMESPACE" --output=jsonpath='{.status.loadBalancer.ingress[0].hostname}{.status.loadBalancer.ingress[0].ip}')" && [[ -n "$frontend_host" ]]; then
+              if html="$(curl --connect-timeout 5 --max-time 10 --fail --silent --show-error "http://$frontend_host/" 2>/dev/null)"; then
+                if [[ "$html" == *'<div id="root"></div>'* ]]; then
+                  echo "Frontend LoadBalancer is serving the app shell."
+                  exit 0
+                fi
               fi
-              echo "Frontend LoadBalancer response did not contain the React root element." >&2
-              exit 1
             fi
-            echo "Waiting for frontend LoadBalancer address ($attempt/30)."
-            sleep 10
+            echo "Waiting for frontend LoadBalancer DNS/HTTP readiness ($attempt/20)."
+            sleep 5
           done
-          echo "Frontend LoadBalancer address was not assigned within 5 minutes." >&2
+          echo "Frontend LoadBalancer did not serve the app shell within 5 minutes." >&2
           exit 1
