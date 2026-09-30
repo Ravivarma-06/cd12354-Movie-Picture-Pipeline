@@ -17,6 +17,7 @@ env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: backend
   EKS_CLUSTER: cluster
+  K8S_NAMESPACE: default
   PYTHON_VERSION: '3.10'
 
 jobs:
@@ -148,7 +149,37 @@ jobs:
           kustomize build | kubectl apply -f -
 
       - name: Wait for deployment rollout
-        run: kubectl rollout status deployment/backend --timeout=180s
+        run: kubectl rollout status deployment/backend --namespace "$K8S_NAMESPACE" --timeout=180s
 
-      - name: Show backend service
-        run: kubectl get service backend
+      - name: Verify backend deployment, pods, and service
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          set -euo pipefail
+          expected_image="$REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA"
+          actual_image="$(kubectl get deployment backend --namespace "$K8S_NAMESPACE" --output=jsonpath='{.spec.template.spec.containers[0].image}')"
+          if [[ "$actual_image" != "$expected_image" ]]; then
+            echo "Backend image mismatch: expected $expected_image, got $actual_image" >&2
+            exit 1
+          fi
+          kubectl wait --for=condition=Ready pod --selector=app=backend --namespace "$K8S_NAMESPACE" --timeout=180s
+          kubectl get deployment backend --namespace "$K8S_NAMESPACE"
+          kubectl get pods --selector=app=backend --namespace "$K8S_NAMESPACE" --output=wide
+          kubectl get service backend --namespace "$K8S_NAMESPACE" --output=wide
+          kubectl describe deployment backend --namespace "$K8S_NAMESPACE"
+
+      - name: Verify backend movies API
+        run: |
+          set -euo pipefail
+          for attempt in {1..30}; do
+            backend_host="$(kubectl get service backend --namespace "$K8S_NAMESPACE" --output=jsonpath='{.status.loadBalancer.ingress[0].hostname}{.status.loadBalancer.ingress[0].ip}')"
+            if [[ -n "$backend_host" ]]; then
+              curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "http://$backend_host/movies" | jq -e '.movies | length > 0 and all(.[]; has("id") and has("title"))' >/dev/null
+              echo "Backend /movies API returned movie records."
+              exit 0
+            fi
+            echo "Waiting for backend LoadBalancer address ($attempt/30)."
+            sleep 10
+          done
+          echo "Backend LoadBalancer address was not assigned within 5 minutes." >&2
+          exit 1

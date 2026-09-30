@@ -24,3 +24,13 @@ def test_movies_endpoint_returns_valid_data():
         assert isinstance(data.get("movies"), list)
         assert len(data["movies"]) > 0
         assert "title" in data["movies"][0]
+
+
+def test_movie_details_endpoint_returns_valid_data():
+    with app.test_client() as client:
+        response = client.get("/movies/123")
+        data = response.get_json()
+
+        assert response.status_code == 200
+        assert data["movie"]["title"] == "Top Gun: Maverick"
+        assert data["movie"]["description"] == "Fighter planes"
